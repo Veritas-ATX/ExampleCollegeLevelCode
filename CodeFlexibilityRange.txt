@@ -1,0 +1,116 @@
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+from scipy.special import ndtri
+import matplotlib.pyplot as plt
+import time
+
+# Note: refer to Abbasi and Niaki's paper for program explanations and math details: 
+# "Estimating process capbility indices of multivariate nonnormal processes"
+
+# Start timer
+start = time.time()
+
+# USER DEFINED PARAMETERS
+# Upper specification limits
+USL1 = 2000.0           # Cost deviation USL
+USL2 = 80.0             # Service level USL
+USL = [USL1, USL2]
+# Lower specification limits
+LSL1 = 80.0
+LSL2 = 40.0
+LSL = [LSL1, LSL2]
+# The number of samples to be drawn from the multivariate normal distribution for PNC estimate
+# Default of 1000000 based off of value given in Abbasi and Niaki paper
+NUM_SAMPLES = 100000
+# The number of simulations to run when estimating the PNC and PCI values
+NUM_SIMS = 10
+# Note: large NUM_SIMS value can lead to high simulation runtime if NUM_SAMPLES is also large
+
+# READ IN DATA
+# Change Excel file path, sheet name, used columns, and rows to skip as needed
+# Note: data assumed to be in the form of an Excel file where each column is a quality
+# variable and each row is a single observation of the quality variables of a process
+# Note: skiprows and skipfooter are used to only read in process data for one given country
+# at a time, so change numbers to accomodate different countries (default India)
+DATA = pd.read_excel("C:\Flexibility\Basedata.xlsx", 
+sheet_name="Data_Base", header=None, usecols="C,D", skiprows=6, skipfooter=3)
+DATA = DATA.to_numpy()
+
+# ROOT TRANSFORMATION FUNCTION
+# Returns the root power required to normalize the input vector
+# Returns 1 if vector is already normal
+def rootTrans(X):
+    tol = 0.05
+    MAX_ITER = 200
+    skew = stats.skew(X)
+    trials = 0
+    lo = 0.00001
+    hi = 0.99999
+    r = 1
+    while np.absolute(skew) >= tol and trials < MAX_ITER:
+        r = (lo + hi) / 2.0
+        Xlo = np.power(X, lo)
+        Xr = np.power(X, r)
+        skewLo = stats.skew(Xlo)
+        skewR = stats.skew(Xr)
+        if skewLo * skewR < 0:
+            hi = r
+        else:
+            lo = r
+        skew = skewR
+        trials += 1
+    return r
+
+# TRANSFORM DATA AND USL's
+Z = DATA.copy()
+# Number of quality characteristics
+p = len(USL)
+for i in range(p): 
+    # Column wise root transformation
+    r = rootTrans(DATA[:,i])
+    Z[:, i] = np.power(DATA[:,i], r)
+    # Standardize column and USL
+    avg = np.mean(Z[:,i])
+    std = np.std(Z[:,i])
+    Z[:,i] = (Z[:,i] - avg) / std
+    USL[i] = (np.power(USL[i], r)- avg) / std
+    LSL[i] = (np.power(LSL[i], r)- avg) / std
+
+# PARAMETERS FOR SAMPLE NORMAL DATA
+cov = np.cov(Z, rowvar=False)
+mean = np.zeros(p)
+
+# CALCULATE PCI ESTIMATE MEAN AND STD
+PCIs = np.zeros(NUM_SIMS)
+for k in range(NUM_SIMS):
+    sample = np.random.multivariate_normal(mean, cov, NUM_SAMPLES)
+    # CALCULATE PNC
+    out = 0
+    for i in range(NUM_SAMPLES):
+        for j in range(p):
+            if sample[i,j] > USL[j] or sample[i,j] < LSL[j]:
+                out += 1
+                break
+    PNC = out / (1.0 * NUM_SAMPLES)
+    # ESTIMATE PCI
+    PCI = ndtri(0.5 + 0.5 * (1 - PNC)) / 3.0
+    PCIs[k] = PCI
+
+# OUTPUT PCI STATS
+print("PCI estimate mean of %.7f" % (np.mean(PCIs)))
+print("PCI estimate std of %.7f" % (np.std(PCIs)))
+
+# SHOW SCATTER PLOT AND TOLERANCE REGION
+plt.scatter(DATA[:,1], DATA[:,0], marker='.')
+plt.fill([LSL2, LSL2, USL2, USL2], [LSL1, USL1, USL1, LSL1], color='g', alpha=0.3)
+plt.title('Plot of Data and Tolerance Zone')
+plt.xlabel('Service Level Percentage')
+plt.ylabel('Cost Deviation')
+plt.xlim(0, 100)
+plt.ylim(bottom=0)
+plt.show()
+
+# End timer and display program runtime
+end = time.time()
+print("Program runtime of %.3f seconds" % (end - start))
