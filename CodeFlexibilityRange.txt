@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import time
 
 # Note: refer to Abbasi and Niaki's paper for program explanations and math details: 
-# "Estimating process capbility indices of multivariate nonnormal processes"
+# "Estimating process capability indices of multivariate nonnormal processes"
 
 # Start timer
 start = time.time()
